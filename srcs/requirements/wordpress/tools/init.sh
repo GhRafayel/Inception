@@ -12,7 +12,7 @@ if [ ! -f wp-config.php ]; then
 fi
 
 # Generate wp-config.php from template
-envsubst < /wp-config-template.php > wp-config.php
+envsubst < ../conf/wp-config-template.php > wp-config.php
 
 # Start PHP-FPM as PID 1
 exec php-fpm7.4 -F
