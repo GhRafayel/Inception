@@ -3,7 +3,8 @@
 set -e
 
 # Wait for MariaDB to be ready
-while ! nc -z ${DB_HOST} 3306; do
+until mariadb -h ${DB_HOST} -u ${DB_USER} -p"${DB_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
+do
     echo "Waiting for MariaDB to be ready..."
     sleep 2
 done

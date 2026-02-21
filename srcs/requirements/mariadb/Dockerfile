@@ -1,12 +1,12 @@
 FROM debian:bookworm
 
-RUN apt-get update && apt-get install -y \ 
-    mariadb-server \ 
-    mariadb-client \ 
+RUN apt-get update && apt-get install -y \
+    mariadb-server \
+    mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Create MariaDB data directory
-RUN mkdir -p /var/lib/mysql && chown -R mysql:mysql /var/lib/mysql
+RUN mkdir -p /var/lib/mysql /var/run/mysqld && chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
 
 # Copy initialization script
 COPY tools/mariadb_init.sh /usr/local/bin/mariadb_init.sh

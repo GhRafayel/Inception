@@ -1,0 +1,312 @@
+
+Inception/
+	srcs/
+		requirements/
+			mariadb/
+				conf/
+					my.cnf
+						[mysqld]
+						skip-networking=0
+						bind-address=0.0.0.0
+						skip-host-cache
+						skip-name-resolve
+						port=3306
+						datadir=/var/lib/mysql
+						socket=/var/run/mysqld/mysqld.sock
+						symbolic-links=0
+
+						[mysqld_safe]
+						socket=/var/run/mysqld/mysqld.sock
+						nice=0
+				tools/
+					mariadb_init.sh
+							#!/bin/bash
+
+							set -e
+
+							# Initialize MariaDB data directory if it doesn't exist
+							if [ ! -d /var/lib/mysql/mysql ]; then
+								echo "Initializing MariaDB database..."
+
+								# Create required directory
+								mkdir -p /var/run/mysqld
+								chown -R mysql:mysql /var/run/mysqld /var/lib/mysql
+
+								# Initialize database
+								mariadb-install-db --user=mysql --datadir=/var/lib/mysql
+
+								echo "MariaDB initialization completed!"
+
+								# Start temporary MariaDB server (without auth)
+								mysqld_safe --skip-grant-tables &
+								MYSQLD_PID=$!
+
+								sleep 5
+
+								# Configure database
+								mysql -u root <<  EOF
+									FLUSH PRIVILEGES;
+									ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+									CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;
+									CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
+									GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
+									FLUSH PRIVILEGES; 
+							EOF
+
+								# Shutdown temporary server
+								mysqladmin -u root -p"${MYSQL_ROOT_PASSWORD}" shutdown
+
+								echo "Database setup completed!"
+							fi
+
+							# Fix permissions again
+							chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+
+							# Start MariaDB normally
+							exec su mysql -s /bin/bash -c "mysqld_safe --user=mysql"
+				Dockerfile
+					FROM debian:bookworm
+
+					RUN apt-get update && apt-get install -y \
+						mariadb-server \
+						mariadb-client \
+						&& rm -rf /var/lib/apt/lists/*
+
+					# Create MariaDB data directory
+					RUN mkdir -p /var/lib/mysql /var/run/mysqld && chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+
+					# Copy initialization script
+					COPY tools/mariadb_init.sh /usr/local/bin/mariadb_init.sh
+					RUN chmod +x /usr/local/bin/mariadb_init.sh
+
+					# Copy my.cnf for MySQL configuration
+					COPY conf/my.cnf /etc/mysql/my.cnf
+
+					EXPOSE 3306
+
+					CMD ["/usr/local/bin/mariadb_init.sh"]
+			wordpress/
+				conf/
+					www.conf
+						[www]
+
+						user = www-data
+						group = www-data
+
+						listen = 9000
+
+						pm = dynamic
+						pm.max_children = 5
+						pm.start_servers = 2
+						pm.min_spare_servers = 1
+						pm.max_spare_servers = 3
+
+						chdir = /
+				tools/
+					wordpress_init.sh
+							#!/bin/bash
+
+							set -e
+
+							# Wait for MariaDB to be ready
+							until mariadb -h ${DB_HOST} -u ${DB_USER} -p"${DB_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
+							do
+								echo "Waiting for MariaDB to be ready..."
+								sleep 2
+							done
+
+							# Check if WordPress is already installed
+							if [ ! -f /var/www/html/wp-config.php ]; then
+								echo "Installing WordPress..."
+								
+								# Download WordPress
+								cd /var/www/html
+								wp core download --allow-root --locale=en_US
+								
+								# Create wp-config.php
+								wp config create \
+									--allow-root \
+									--dbname=${DB_NAME} \
+									--dbuser=${DB_USER} \
+									--dbpass=${DB_PASSWORD} \
+									--dbhost=${DB_HOST} \
+									--skip-check
+								
+								# Install WordPress
+								wp core install \
+									--allow-root \
+									--url=${WP_URL} \
+									--title="${WP_TITLE}" \
+									--admin_user=${WP_ADMIN_USER} \
+									--admin_password=${WP_ADMIN_PASSWORD} \
+									--admin_email=${WP_ADMIN_EMAIL}
+								
+								# Fix permissions
+								chown -R www-data:www-data /var/www/html
+								chmod -R 755 /var/www/html
+								
+								echo "WordPress installation completed!"
+							else
+								echo "WordPress is already installed."
+							fi
+
+							# Start PHP-FPM
+							exec php-fpm8.2 -F
+				Dockerfile
+						FROM debian:bookworm
+
+						RUN apt-get update && apt-get install -y \
+							php8.2-fpm \
+							php8.2-mysql \
+							php8.2-gd \
+							php8.2-soap \
+							php8.2-xml \
+							php8.2-curl \
+							php8.2-mbstring \
+							php8.2-zip \
+							php8.2-intl \
+							php8.2-imagick \
+							curl \
+							wget \
+							netcat-openbsd \
+							&& rm -rf /var/lib/apt/lists/*
+
+						# Download and install WordPress CLI
+						RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
+							&& chmod +x wp-cli.phar \
+							&& mv wp-cli.phar /usr/local/bin/wp
+
+						# Create WordPress directory
+						RUN mkdir -p /var/www/html && chown -R www-data:www-data /var/www/html
+
+						# Copy PHP-FPM configuration
+						COPY conf/www.conf /etc/php/8.2/fpm/pool.d/www.conf
+
+						# Copy WordPress initialization script
+						COPY tools/wordpress_init.sh /usr/local/bin/wordpress_init.sh
+						RUN chmod +x /usr/local/bin/wordpress_init.sh
+
+						WORKDIR /var/www/html
+
+						EXPOSE 9000
+
+						CMD ["/usr/local/bin/wordpress_init.sh"]
+			nginx/
+				conf/
+					demo.42.fr.conf
+						server 
+						{
+							listen 443 ssl http2;
+							listen [::]:443 ssl http2;
+
+							server_name demo.42.fr;
+
+							ssl_certificate /etc/nginx/ssl/demo.42.fr.crt;
+							ssl_certificate_key /etc/nginx/ssl/demo.42.fr.key;
+							ssl_protocols TLSv1.2 TLSv1.3;
+							ssl_ciphers HIGH:!aNULL:!MD5;
+							ssl_prefer_server_ciphers on;
+
+							root /var/www/html;
+							index index.php index.html index.htm;
+
+							# Redirect all HTTP to HTTPS (if needed)
+							error_page 497 https://$server_name$request_uri;
+
+							location / {
+								try_files $uri $uri/ /index.php?$args;
+							}
+
+							location ~ \.php$ {
+								fastcgi_pass wordpress:9000;
+								fastcgi_index index.php;
+								fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+								include fastcgi_params;
+								fastcgi_param PATH_INFO $fastcgi_path_info;
+							}
+
+							location ~ \.ht {
+								deny all;
+							}
+
+							client_max_body_size 100M;
+						}
+					nginx.conf
+						user www-data;
+						worker_processes auto;
+						pid /run/nginx.pid;
+						error_log /var/log/nginx/error.log;
+
+						events {
+							worker_connections 768;
+						}
+
+						http {
+							sendfile on;
+							tcp_nopush on;
+							tcp_nodelay on;
+							keepalive_timeout 65;
+							types_hash_max_size 2048;
+
+							include /etc/nginx/mime.types;
+							default_type application/octet-stream;
+
+							access_log /var/log/nginx/access.log;
+
+							gzip on;
+
+							include /etc/nginx/sites-enabled/*;
+						}
+				Dockerfile
+					FROM debian:bookworm
+
+					RUN apt-get update && apt-get install -y \
+						nginx \
+						openssl \
+						&& rm -rf /var/lib/apt/lists/*
+
+					# Create SSL certificates directory
+					RUN mkdir -p /etc/nginx/ssl
+
+					# Generate self-signed SSL certificate
+					RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+						-keyout /etc/nginx/ssl/demo.42.fr.key \
+						-out /etc/nginx/ssl/demo.42.fr.crt \
+						-subj "/C=FR/ST=Ile-de-France/L=Paris/O=42/CN=demo.42.fr"
+
+					# Copy nginx configuration
+					COPY conf/nginx.conf /etc/nginx/nginx.conf
+					COPY conf/demo.42.fr.conf /etc/nginx/sites-available/demo.42.fr
+
+					# Enable the site
+					RUN ln -sf /etc/nginx/sites-available/demo.42.fr /etc/nginx/sites-enabled/demo.42.fr
+
+					# Remove default site
+					RUN rm -f /etc/nginx/sites-enabled/default
+
+					# Create www directory
+					RUN mkdir -p /var/www/html && chown -R www-data:www-data /var/www/html
+
+					EXPOSE 443
+
+					CMD ["nginx", "-g", "daemon off;"]
+	.env
+		# Domain Configuration
+		DOMAIN_NAME=demo.42.fr
+
+		# Database Configuration
+		DB_HOST=mariadb
+		DB_NAME=wordpress_db
+		DB_USER=wp_user
+		DB_PASSWORD=SecureWPPassword123!
+
+		# MariaDB Root Password
+		MYSQL_ROOT_PASSWORD=SecureRootPassword123!
+
+		# WordPress Configuration
+		WP_ADMIN_USER=wpadmin_user
+		WP_ADMIN_PASSWORD=XXX
+		WP_ADMIN_EMAIL=admin@demo.42.fr
+		WP_TITLE=Demo WordPress Site
+		WP_URL=https://demo.42.fr
+	Makefile

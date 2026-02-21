@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     php8.2-imagick \
     curl \
     wget \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and install WordPress CLI

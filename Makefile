@@ -2,23 +2,23 @@
 
 all: build up
 
+DC=docker compose -f srcs/docker-compose.yml
+
 build:
-	docker-compose -f srcs/docker-compose.yml build
+	$(DC) build
 
 up:
-	docker-compose -f srcs/docker-compose.yml up -d
+	$(DC) up -d
 
 down:
-	docker-compose -f srcs/docker-compose.yml down
-
-restart: down up
-
-clean:
-	docker-compose -f srcs/docker-compose.yml down -v
-	docker system prune -af
+	$(DC) down
 
 logs:
-	docker-compose -f srcs/docker-compose.yml logs -f
+	$(DC) logs -f
+
+clean:
+	$(DC) down -v
+	docker system prune -af
 
 help:
 	@echo "Inception Project - Docker Infrastructure"
