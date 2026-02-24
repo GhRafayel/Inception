@@ -1,0 +1,52 @@
+
+services:
+  mariadb:
+    build: ./srcs/requirements/mariadb
+    container_name: mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_USER: ${MYSQL_USER}
+    volumes:
+      - mariadb:/var/lib/mysql
+    networks:
+      - srcs_inception
+
+  wordpress:
+    build: ./srcs/requirements/wordpress
+    container_name: wordpress
+    restart: unless-stopped
+    environment:
+      MYSQL_USER: ${MYSQL_USER}
+      DB_HOST: ${DB_HOST}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      WP_URL: ${WP_URL}
+      WP_TITLE: ${WP_TITLE}
+      WP_ADMIN_USER: ${WP_ADMIN_USER}
+      WP_ADMIN_PASSWORD: ${WP_ADMIN_PASSWORD}
+      WP_ADMIN_EMAIL: ${WP_ADMIN_EMAIL}
+    volumes:
+      - wordpress:/var/www/html
+    depends_on:
+      - mariadb
+    networks:
+      - srcs_inception
+
+  nginx:
+    build: ./srcs/requirements/nginx
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    depends_on:
+      - wordpress
+    networks:
+      - srcs_inception
+
+volumes:
+  mariadb:
+  wordpress:
+
+networks:
+  srcs_inception:
+    driver: bridge

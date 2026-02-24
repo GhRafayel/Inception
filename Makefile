@@ -1,8 +1,8 @@
-.PHONY: all build up down restart clean logs help
+.PHONY: all build up down clean logs help
 
 all: build up
 
-DC=docker compose -f srcs/docker-compose.yml
+DC=docker compose -f docker-compose.yml
 
 build:
 	$(DC) build
@@ -19,6 +19,11 @@ logs:
 clean:
 	$(DC) down -v
 	docker system prune -af
+
+fclean: clean
+	docker rmi -f $$(docker images -aq) || true
+	docker network prune -f
+	docker builder prune -af
 
 help:
 	@echo "Inception Project - Docker Infrastructure"

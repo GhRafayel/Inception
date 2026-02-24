@@ -2,31 +2,27 @@
 
 set -e
 
-# Wait for MariaDB to be ready
-until mariadb -h ${DB_HOST} -u ${DB_USER} -p"${DB_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
+until mysql -h ${DB_HOST} -u ${MYSQL_USER} -p"${MYSQL_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
 do
     echo "Waiting for MariaDB to be ready..."
     sleep 2
 done
 
-# Check if WordPress is already installed
 if [ ! -f /var/www/html/wp-config.php ]; then
     echo "Installing WordPress..."
     
-    # Download WordPress
     cd /var/www/html
+    
     wp core download --allow-root --locale=en_US
     
-    # Create wp-config.php
     wp config create \
         --allow-root \
-        --dbname=${DB_NAME} \
-        --dbuser=${DB_USER} \
-        --dbpass=${DB_PASSWORD} \
+        --dbname=${MYSQL_DATABASE} \
+        --dbuser=${MYSQL_USER} \
+        --dbpass=${MYSQL_PASSWORD} \
         --dbhost=${DB_HOST} \
         --skip-check
     
-    # Install WordPress
     wp core install \
         --allow-root \
         --url=${WP_URL} \
@@ -35,7 +31,6 @@ if [ ! -f /var/www/html/wp-config.php ]; then
         --admin_password=${WP_ADMIN_PASSWORD} \
         --admin_email=${WP_ADMIN_EMAIL}
     
-    # Fix permissions
     chown -R www-data:www-data /var/www/html
     chmod -R 755 /var/www/html
     
@@ -44,5 +39,4 @@ else
     echo "WordPress is already installed."
 fi
 
-# Start PHP-FPM
 exec php-fpm8.2 -F

@@ -21,48 +21,37 @@ Inception/
 				tools/
 					mariadb_init.sh
 							#!/bin/bash
-
 							set -e
 
-							# Initialize MariaDB data directory if it doesn't exist
+							# Initialize MariaDB only if it hasn't been initialized yet
 							if [ ! -d /var/lib/mysql/mysql ]; then
 								echo "Initializing MariaDB database..."
 
-								# Create required directory
 								mkdir -p /var/run/mysqld
 								chown -R mysql:mysql /var/run/mysqld /var/lib/mysql
 
-								# Initialize database
 								mariadb-install-db --user=mysql --datadir=/var/lib/mysql
 
-								echo "MariaDB initialization completed!"
-
-								# Start temporary MariaDB server (without auth)
+								echo "Temporary MariaDB start for setup..."
 								mysqld_safe --skip-grant-tables &
 								MYSQLD_PID=$!
+								sleep 10
 
-								sleep 5
-
-								# Configure database
-								mysql -u root <<  EOF
-									FLUSH PRIVILEGES;
-									ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
-									CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;
-									CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
-									GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
-									FLUSH PRIVILEGES; 
+								mysql -u root << EOF
+							FLUSH PRIVILEGES;
+							ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+							CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`;
+							CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
+							GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
+							FLUSH PRIVILEGES;
 							EOF
 
-								# Shutdown temporary server
 								mysqladmin -u root -p"${MYSQL_ROOT_PASSWORD}" shutdown
-
 								echo "Database setup completed!"
 							fi
 
-							# Fix permissions again
 							chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
 
-							# Start MariaDB normally
 							exec su mysql -s /bin/bash -c "mysqld_safe --user=mysql"
 				Dockerfile
 					FROM debian:bookworm
@@ -72,14 +61,14 @@ Inception/
 						mariadb-client \
 						&& rm -rf /var/lib/apt/lists/*
 
-					# Create MariaDB data directory
+					# Data directories
 					RUN mkdir -p /var/lib/mysql /var/run/mysqld && chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
 
-					# Copy initialization script
+					# Copy init script
 					COPY tools/mariadb_init.sh /usr/local/bin/mariadb_init.sh
 					RUN chmod +x /usr/local/bin/mariadb_init.sh
 
-					# Copy my.cnf for MySQL configuration
+					# Copy MariaDB config
 					COPY conf/my.cnf /etc/mysql/my.cnf
 
 					EXPOSE 3306
@@ -105,34 +94,29 @@ Inception/
 				tools/
 					wordpress_init.sh
 							#!/bin/bash
-
 							set -e
 
-							# Wait for MariaDB to be ready
-							until mariadb -h ${DB_HOST} -u ${DB_USER} -p"${DB_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
+							until mysql -h ${DB_HOST} -u ${MYSQL_USER} -p"${MYSQL_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
 							do
 								echo "Waiting for MariaDB to be ready..."
 								sleep 2
 							done
 
-							# Check if WordPress is already installed
 							if [ ! -f /var/www/html/wp-config.php ]; then
 								echo "Installing WordPress..."
 								
-								# Download WordPress
 								cd /var/www/html
+								
 								wp core download --allow-root --locale=en_US
 								
-								# Create wp-config.php
 								wp config create \
 									--allow-root \
-									--dbname=${DB_NAME} \
-									--dbuser=${DB_USER} \
-									--dbpass=${DB_PASSWORD} \
+									--dbname=${MYSQL_DATABASE} \
+									--dbuser=${MYSQL_USER} \
+									--dbpass=${MYSQL_PASSWORD} \
 									--dbhost=${DB_HOST} \
 									--skip-check
 								
-								# Install WordPress
 								wp core install \
 									--allow-root \
 									--url=${WP_URL} \
@@ -141,7 +125,6 @@ Inception/
 									--admin_password=${WP_ADMIN_PASSWORD} \
 									--admin_email=${WP_ADMIN_EMAIL}
 								
-								# Fix permissions
 								chown -R www-data:www-data /var/www/html
 								chmod -R 755 /var/www/html
 								
@@ -150,7 +133,6 @@ Inception/
 								echo "WordPress is already installed."
 							fi
 
-							# Start PHP-FPM
 							exec php-fpm8.2 -F
 				Dockerfile
 						FROM debian:bookworm
@@ -169,6 +151,7 @@ Inception/
 							curl \
 							wget \
 							netcat-openbsd \
+							mariadb-client \
 							&& rm -rf /var/lib/apt/lists/*
 
 						# Download and install WordPress CLI
@@ -194,38 +177,40 @@ Inception/
 			nginx/
 				conf/
 					demo.42.fr.conf
-						server 
-						{
-							listen 443 ssl http2;
-							listen [::]:443 ssl http2;
+						server {
+							listen 80;
+							listen [::]:80;
+							server_name XXX.42.fr;
+							return 301 https://$host$request_uri;
+						}
 
-							server_name demo.42.fr;
+						server {
+							listen 443 ssl;
+							listen [::]:443 ssl;
 
-							ssl_certificate /etc/nginx/ssl/demo.42.fr.crt;
-							ssl_certificate_key /etc/nginx/ssl/demo.42.fr.key;
+							server_name XXX.42.fr;
+
+							ssl_certificate     /etc/nginx/ssl/XXX.42.fr.crt;
+							ssl_certificate_key /etc/nginx/ssl/XXX.42.fr.key;
+
 							ssl_protocols TLSv1.2 TLSv1.3;
 							ssl_ciphers HIGH:!aNULL:!MD5;
 							ssl_prefer_server_ciphers on;
 
 							root /var/www/html;
-							index index.php index.html index.htm;
-
-							# Redirect all HTTP to HTTPS (if needed)
-							error_page 497 https://$server_name$request_uri;
+							index index.php index.html;
 
 							location / {
 								try_files $uri $uri/ /index.php?$args;
 							}
 
 							location ~ \.php$ {
-								fastcgi_pass wordpress:9000;
-								fastcgi_index index.php;
-								fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
 								include fastcgi_params;
-								fastcgi_param PATH_INFO $fastcgi_path_info;
+								fastcgi_pass wordpress:9000;
+								fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
 							}
 
-							location ~ \.ht {
+							location ~ /\.ht {
 								deny all;
 							}
 
@@ -291,22 +276,98 @@ Inception/
 
 					CMD ["nginx", "-g", "daemon off;"]
 	.env
-		# Domain Configuration
-		DOMAIN_NAME=demo.42.fr
+		MYSQL_ROOT_PASSWORD=XXX
+		MYSQL_DATABASE=wordpress
+		MYSQL_USER=XXX
+		MYSQL_PASSWORD=XXX
 
-		# Database Configuration
 		DB_HOST=mariadb
-		DB_NAME=wordpress_db
-		DB_USER=wp_user
-		DB_PASSWORD=SecureWPPassword123!
 
-		# MariaDB Root Password
-		MYSQL_ROOT_PASSWORD=SecureRootPassword123!
+		DOMAIN_NAME=XXX
 
-		# WordPress Configuration
-		WP_ADMIN_USER=wpadmin_user
+		WP_URL=https://XXX
+		WP_TITLE=Inception
+		WP_ADMIN_USER=admin
 		WP_ADMIN_PASSWORD=XXX
-		WP_ADMIN_EMAIL=admin@demo.42.fr
-		WP_TITLE=Demo WordPress Site
-		WP_URL=https://demo.42.fr
+		WP_ADMIN_EMAIL=admin@example.com
 	Makefile
+		.PHONY: all build up down restart clean logs help
+
+		all: build up
+
+		DC=docker compose -f docker-compose.yml
+
+		build:
+			$(DC) build
+
+		up:
+			$(DC) up -d
+
+		down:
+			$(DC) down
+
+		logs:
+			$(DC) logs -f
+
+		clean:
+			$(DC) down -v
+			docker system prune -af
+		fclean: clean
+			docker rmi -f $$(docker images -aq) || true
+			docker network prune -f
+			docker builder prune -af
+
+		help:
+			@echo "Inception Project - Docker Infrastructure"
+			@echo "=========================================="
+			@echo "Available commands:"
+			@echo "  make all       - Build and start all containers"
+			@echo "  make build     - Build Docker images"
+			@echo "  make up        - Start containers"
+			@echo "  make down      - Stop containers"
+			@echo "  make restart   - Restart all containers"
+			@echo "  make clean     - Stop containers and remove volumes"
+			@echo "  make logs      - View container logs"
+			@echo "  make help      - Show this help message"
+	docker-compose.yml
+
+		services:
+		mariadb:
+			build: ./srcs/requirements/mariadb
+			container_name: mariadb
+			env_file:
+			- .env
+			volumes:
+			- mariadb:/var/lib/mysql
+			networks:
+			- srcs_inception
+
+		wordpress:
+			build: ./srcs/requirements/wordpress
+			container_name: wordpress
+			env_file:
+			- .env
+			volumes:
+			- wordpress:/var/www/html
+			depends_on:
+			- mariadb
+			networks:
+			- srcs_inception
+
+		nginx:
+			build: ./srcs/requirements/nginx
+			container_name: nginx
+			ports:
+			- "443:443"
+			depends_on:
+			- wordpress
+			networks:
+			- srcs_inception
+
+		volumes:
+		mariadb:
+		wordpress:
+
+		networks:
+		srcs_inception:
+			driver: bridge

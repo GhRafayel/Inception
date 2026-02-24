@@ -1,10 +1,5 @@
 # Environment files
 .env
-.env.local
-
-# Sensitive data
-srcs/.env
-srcs/.env.local
 
 # Docker volumes
 data/
