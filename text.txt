@@ -33,26 +33,24 @@ Inception/
 								mariadb-install-db --user=mysql --datadir=/var/lib/mysql
 
 								echo "Temporary MariaDB start for setup..."
-								mysqld_safe --skip-grant-tables &
+								mysqld_safe --user=mysql &
 								MYSQLD_PID=$!
 								sleep 10
 
 								mysql -u root << EOF
-							FLUSH PRIVILEGES;
-							ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
-							CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`;
-							CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
-							GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
-							FLUSH PRIVILEGES;
+									FLUSH PRIVILEGES;
+									ALTER USER 'root'@'localhost' IDENTIFIED BY '123';
+									CREATE DATABASE IF NOT EXISTS \`wordpress\`;
+									CREATE USER 'user42'@'%' IDENTIFIED BY '123';
+									GRANT ALL PRIVILEGES ON wordpress.* TO 'user42'@'%';
+									FLUSH PRIVILEGES;
 							EOF
 
-								mysqladmin -u root -p"${MYSQL_ROOT_PASSWORD}" shutdown
-								echo "Database setup completed!"
+								mysqladmin -u root -p "123" shutdown
+									echo "Database setup completed!"
 							fi
-
-							chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
-
-							exec su mysql -s /bin/bash -c "mysqld_safe --user=mysql"
+								chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+								exec su mysql -s /bin/bash -c "mysqld_safe --user=mysql"
 				Dockerfile
 					FROM debian:bookworm
 
@@ -62,78 +60,79 @@ Inception/
 						&& rm -rf /var/lib/apt/lists/*
 
 					# Data directories
-					RUN mkdir -p /var/lib/mysql /var/run/mysqld && chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+					RUN mkdir -p /var/lib/mysql /var/run/mysqld 
+					RUN chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+
+					# Copy MariaDB config
+					COPY conf/my.cnf /etc/mysql/my.cnf
 
 					# Copy init script
 					COPY tools/mariadb_init.sh /usr/local/bin/mariadb_init.sh
 					RUN chmod +x /usr/local/bin/mariadb_init.sh
 
-					# Copy MariaDB config
-					COPY conf/my.cnf /etc/mysql/my.cnf
+
 
 					EXPOSE 3306
 
 					CMD ["/usr/local/bin/mariadb_init.sh"]
 			wordpress/
 				conf/
-					www.conf
-						[www]
+					[www]
+					user = www-data
+					group = www-data
 
-						user = www-data
-						group = www-data
+					listen = 9000
 
-						listen = 9000
+					pm = dynamic
+					pm.max_children = 5
+					pm.start_servers = 2
+					pm.min_spare_servers = 1
+					pm.max_spare_servers = 3
 
-						pm = dynamic
-						pm.max_children = 5
-						pm.start_servers = 2
-						pm.min_spare_servers = 1
-						pm.max_spare_servers = 3
-
-						chdir = /
+					chdir = /
 				tools/
-					wordpress_init.sh
-							#!/bin/bash
-							set -e
+					#!/bin/bash
 
-							until mysql -h ${DB_HOST} -u ${MYSQL_USER} -p"${MYSQL_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
-							do
-								echo "Waiting for MariaDB to be ready..."
-								sleep 2
-							done
+					set -e
 
-							if [ ! -f /var/www/html/wp-config.php ]; then
-								echo "Installing WordPress..."
-								
-								cd /var/www/html
-								
-								wp core download --allow-root --locale=en_US
-								
-								wp config create \
-									--allow-root \
-									--dbname=${MYSQL_DATABASE} \
-									--dbuser=${MYSQL_USER} \
-									--dbpass=${MYSQL_PASSWORD} \
-									--dbhost=${DB_HOST} \
-									--skip-check
-								
-								wp core install \
-									--allow-root \
-									--url=${WP_URL} \
-									--title="${WP_TITLE}" \
-									--admin_user=${WP_ADMIN_USER} \
-									--admin_password=${WP_ADMIN_PASSWORD} \
-									--admin_email=${WP_ADMIN_EMAIL}
-								
-								chown -R www-data:www-data /var/www/html
-								chmod -R 755 /var/www/html
-								
-								echo "WordPress installation completed!"
-							else
-								echo "WordPress is already installed."
-							fi
+					until mysql -h ${DB_HOST} -u ${MYSQL_USER} -p"${MYSQL_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1
+					do
+						echo "Waiting for MariaDB to be ready..."
+						sleep 2
+					done
 
-							exec php-fpm8.2 -F
+					if [ ! -f /var/www/html/wp-config.php ]; then
+						echo "Installing WordPress..."
+						
+						cd /var/www/html
+						
+						wp core download --allow-root --locale=en_US
+						
+						wp config create \
+							--allow-root \
+							--dbname=${MYSQL_DATABASE} \
+							--dbuser=${MYSQL_USER} \
+							--dbpass=${MYSQL_PASSWORD} \
+							--dbhost=${DB_HOST} \
+							--skip-check
+						
+						wp core install \
+							--allow-root \
+							--url=${WP_URL} \
+							--title="${WP_TITLE}" \
+							--admin_user=${WP_ADMIN_USER} \
+							--admin_password=${WP_ADMIN_PASSWORD} \
+							--admin_email=${WP_ADMIN_EMAIL}
+						
+						chown -R www-data:www-data /var/www/html
+						chmod -R 755 /var/www/html
+						
+						echo "WordPress installation completed!"
+					else
+						echo "WordPress is already installed."
+					fi
+
+					exec php-fpm8.2 -F
 				Dockerfile
 						FROM debian:bookworm
 
@@ -150,6 +149,7 @@ Inception/
 							php8.2-imagick \
 							curl \
 							wget \
+							sudo \
 							netcat-openbsd \
 							mariadb-client \
 							&& rm -rf /var/lib/apt/lists/*
@@ -178,24 +178,23 @@ Inception/
 				conf/
 					demo.42.fr.conf
 						server {
-							listen 80;
-							listen [::]:80;
-							server_name XXX.42.fr;
-							return 301 https://$host$request_uri;
+						listen 80;
+						listen [::]:80;
+						server_name xxx.42.fr;
+						return 301 https://$host$request_uri;
 						}
 
 						server {
 							listen 443 ssl;
 							listen [::]:443 ssl;
 
-							server_name XXX.42.fr;
+							server_name xxx.42.fr;
 
-							ssl_certificate     /etc/nginx/ssl/XXX.42.fr.crt;
-							ssl_certificate_key /etc/nginx/ssl/XXX.42.fr.key;
+							ssl_certificate     /etc/nginx/ssl/xxx.42.fr.crt;
+							ssl_certificate_key /etc/nginx/ssl/xxx.42.fr.key;
 
 							ssl_protocols TLSv1.2 TLSv1.3;
 							ssl_ciphers HIGH:!aNULL:!MD5;
-							ssl_prefer_server_ciphers on;
 
 							root /var/www/html;
 							index index.php index.html;
@@ -250,48 +249,50 @@ Inception/
 						openssl \
 						&& rm -rf /var/lib/apt/lists/*
 
-					# Create SSL certificates directory
+					# Create SSL directory
 					RUN mkdir -p /etc/nginx/ssl
 
 					# Generate self-signed SSL certificate
 					RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-						-keyout /etc/nginx/ssl/demo.42.fr.key \
-						-out /etc/nginx/ssl/demo.42.fr.crt \
-						-subj "/C=FR/ST=Ile-de-France/L=Paris/O=42/CN=demo.42.fr"
+						-keyout /etc/nginx/ssl/xxx.42.fr.key \
+						-out /etc/nginx/ssl/xxx.42.fr.crt \
+						-subj "/C=FR/ST=Ile-de-France/L=Paris/O=42/CN=login.42.fr"
 
-					# Copy nginx configuration
+					# Copy main nginx config
 					COPY conf/nginx.conf /etc/nginx/nginx.conf
-					COPY conf/demo.42.fr.conf /etc/nginx/sites-available/demo.42.fr
 
-					# Enable the site
-					RUN ln -sf /etc/nginx/sites-available/demo.42.fr /etc/nginx/sites-enabled/demo.42.fr
+					# Copy server block
+					COPY conf/default.conf /etc/nginx/sites-available/default
 
-					# Remove default site
-					RUN rm -f /etc/nginx/sites-enabled/default
+					# Enable site
+					RUN ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
 
-					# Create www directory
+					# Remove default nginx site if exists
+					RUN rm -f /etc/nginx/sites-enabled/default.default 2>/dev/null || true
+
+					# Create WordPress directory
 					RUN mkdir -p /var/www/html && chown -R www-data:www-data /var/www/html
 
 					EXPOSE 443
 
 					CMD ["nginx", "-g", "daemon off;"]
 	.env
-		MYSQL_ROOT_PASSWORD=XXX
+		MYSQL_ROOT_PASSWORD=123
 		MYSQL_DATABASE=wordpress
-		MYSQL_USER=XXX
-		MYSQL_PASSWORD=XXX
+		MYSQL_USER=${USER}
+		MYSQL_PASSWORD=123
 
 		DB_HOST=mariadb
 
-		DOMAIN_NAME=XXX
+		DOMAIN_NAME=rghazary.42.fr
 
-		WP_URL=https://XXX
+		WP_URL=https://rghazary.42.fr
 		WP_TITLE=Inception
 		WP_ADMIN_USER=admin
-		WP_ADMIN_PASSWORD=XXX
+		WP_ADMIN_PASSWORD=123
 		WP_ADMIN_EMAIL=admin@example.com
 	Makefile
-		.PHONY: all build up down restart clean logs help
+		.PHONY: all build up down clean logs help
 
 		all: build up
 
@@ -312,6 +313,7 @@ Inception/
 		clean:
 			$(DC) down -v
 			docker system prune -af
+
 		fclean: clean
 			docker rmi -f $$(docker images -aq) || true
 			docker network prune -f
@@ -329,14 +331,17 @@ Inception/
 			@echo "  make clean     - Stop containers and remove volumes"
 			@echo "  make logs      - View container logs"
 			@echo "  make help      - Show this help message"
+
 	docker-compose.yml
 
+				
 		services:
 		mariadb:
 			build: ./srcs/requirements/mariadb
 			container_name: mariadb
-			env_file:
-			- .env
+			restart: unless-stopped
+			environment:
+			MYSQL_USER: ${MYSQL_USER}
 			volumes:
 			- mariadb:/var/lib/mysql
 			networks:
@@ -345,8 +350,17 @@ Inception/
 		wordpress:
 			build: ./srcs/requirements/wordpress
 			container_name: wordpress
-			env_file:
-			- .env
+			restart: unless-stopped
+			environment:
+			MYSQL_USER: ${MYSQL_USER}
+			DB_HOST: ${DB_HOST}
+			MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+			MYSQL_DATABASE: ${MYSQL_DATABASE}
+			WP_URL: ${WP_URL}
+			WP_TITLE: ${WP_TITLE}
+			WP_ADMIN_USER: ${WP_ADMIN_USER}
+			WP_ADMIN_PASSWORD: ${WP_ADMIN_PASSWORD}
+			WP_ADMIN_EMAIL: ${WP_ADMIN_EMAIL}
 			volumes:
 			- wordpress:/var/www/html
 			depends_on:
@@ -357,6 +371,7 @@ Inception/
 		nginx:
 			build: ./srcs/requirements/nginx
 			container_name: nginx
+			restart: unless-stopped
 			ports:
 			- "443:443"
 			depends_on:

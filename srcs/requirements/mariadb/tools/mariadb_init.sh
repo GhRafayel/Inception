@@ -1,31 +1,59 @@
 #!/bin/bash
 set -e
 
-# Initialize MariaDB only if it hasn't been initialized yet
-if [ ! -d /var/lib/mysql/mysql ]; then
-    echo "Initializing MariaDB database..."
+echo "=== MariaDB Init Script Starting ==="
 
-    mkdir -p /var/run/mysqld
-    chown -R mysql:mysql /var/run/mysqld /var/lib/mysql
-
-    mariadb-install-db --user=mysql --datadir=/var/lib/mysql
-
-    echo "Temporary MariaDB start for setup..."
-    mysqld_safe --user=mysql &
-    MYSQLD_PID=$!
-    sleep 10
-
+# Check if data directory is initialized
+if [ ! -d "/var/lib/mysql/wordpress" ]; then
+    echo ">>> Database not initialized, starting setup..."
+    
+    # Initialize data directory
+    echo ">>> Running mysql_install_db..."
+    mysql_install_db --user=mysql --datadir=/var/lib/mysql --rpm
+    
+    # Start temporary server
+    echo ">>> Starting temporary mysqld..."
+    mysqld --user=mysql --skip-networking &
+    pid="$!"
+    
+    # Wait for server to be ready
+    echo ">>> Waiting for temporary server to be ready..."
+    until mysqladmin ping --silent 2>/dev/null; do
+        echo "    ...waiting"
+        sleep 1
+    done
+    echo ">>> Temporary server is ready!"
+    
+    # Setup database and users
+    echo ">>> Creating database and users..."
+    echo "    DB: ${MYSQL_DATABASE}"
+    echo "    USER: ${MYSQL_USER}"
+    
     mysql -u root << EOF
         FLUSH PRIVILEGES;
-        ALTER USER 'root'@'localhost' IDENTIFIED BY '123';
-        CREATE DATABASE IF NOT EXISTS \`wordpress\`;
-        CREATE USER 'user42'@'%' IDENTIFIED BY '123';
-        GRANT ALL PRIVILEGES ON wordpress.* TO 'user42'@'%';
+        ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+        CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE USER '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
+        GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
         FLUSH PRIVILEGES;
 EOF
-
-    mysqladmin -u root -p "123" shutdown
-        echo "Database setup completed!"
+    
+    echo ">>> Database setup completed!"
+    
+    # Shutdown temporary server
+    echo ">>> Shutting down temporary server..."
+    mysqladmin -u root -p"${MYSQL_ROOT_PASSWORD}" shutdown
+    wait $pid || true
+    
+    echo ">>> Initialization complete!"
+else
+    echo ">>> Database already initialized, skipping setup"
 fi
-    chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
-    exec su mysql -s /bin/bash -c "mysqld_safe --user=mysql"
+
+# Fix permissions
+echo ">>> Fixing permissions..."
+chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+
+# Start MariaDB
+echo ">>> Starting MariaDB..."
+exec mysqld --user=mysql
