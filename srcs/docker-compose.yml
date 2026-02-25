@@ -11,7 +11,7 @@ services:
     volumes:
       - mariadb:/var/lib/mysql
     networks:
-      - inception
+      - inception_network
 
   wordpress:
     build: ./requirements/wordpress
@@ -32,7 +32,7 @@ services:
     depends_on:
       - mariadb
     networks:
-      - inception
+      - inception_network
 
   nginx:
     build:
@@ -48,7 +48,7 @@ services:
     depends_on:
       - wordpress
     networks:
-      - inception
+      - inception_network
 
 volumes:
   mariadb:
@@ -65,5 +65,5 @@ volumes:
       device: /home/rafo/data/wordpress
 
 networks:
-  inception:
+  inception_network:
     driver: bridge

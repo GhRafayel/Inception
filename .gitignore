@@ -1,5 +1,8 @@
 # Environment files
-.env
+/srcs/.env
 
-# Docker volumes
-data/
+en.subject.pdf
+
+structur.sh
+subject.csv
+comands.csv
