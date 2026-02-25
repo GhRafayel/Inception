@@ -57,3 +57,85 @@ The project includes the following sources:
 - Docker Compose ≥ 2.0  
 - Linux, macOS, or Windows with Docker Desktop  
 
+
+## Project Structure
+
+
+inception/
+├── Makefile                    # ONE Makefile at root
+├── srcs/
+│   ├── requirements/
+│   ├── .env
+│   ├── docker-compose.yml
+│   ├── nginx/
+│   │   ├── Dockerfile
+│   │   ├── conf/
+│   │   └── tools/
+│   │       └── mariadb_init
+│   ├── wordpress/
+│   │   ├── Dockerfile
+│   │   ├── conf/
+│   │   └── tools/
+│   │       └── wordpress_init
+│   └── mariadb/
+│       ├── Dockerfile
+│       ├── conf/
+│       ├── demo.42.fr.conf
+│       └── nginx.conf
+├── README.md
+├── USER_DOC.md
+└── DEV_DOC.md
+
+
+## Container Lifecycle
+
+### Step 1: Build (Run once, creates image)
+
+Dockerfile (recipe) → docker build → Image (template)
+
+
+### Step 2: First Run (Container creation initialization)
+
+docker compose up → Container Starts
+│
+├── 1. Run ENTRYPOINT (init.sh)
+│
+├── 2. Check: Database exists?
+│   ├── NO → Initialize
+│   │   ├── mysql_install_db
+│   │   ├── Start temp server
+│   │   ├── Create DB/users
+│   │   └── Stop temp server
+│   └── YES → Skip init
+│
+└── 3. Start final mysqld
+(PID 1, keeps container alive)
+
+
+
+### Step 3: Subsequent Runs (Data persists in volume)
+
+
+docker compose up → Container Starts
+│
+├── 1. Run ENTRYPOINT (init.sh)
+│
+├── 2. Check: Database exists?
+│   └── YES → Skip all init
+│
+└── 3. Start final mysqld
+
+(Data preserved in named volume)
+
+
+## Initialization Flow Details
+
+| Phase | Action | Purpose |
+|-------|--------|---------|
+| **Check** | `if [ ! -d "/var/lib/mysql/wordpress" ]` | Prevents re-initialization on container restart |
+| **Init** | `mysql_install_db` | Creates system tables MariaDB needs to run |
+| **Temp Start** | `mysqld_safe &` | Starts server briefly to run SQL commands |
+| **Wait** | `until mysqladmin ping` | Ensures server is ready before proceeding |
+| **Setup** | SQL commands | Creates database, users, permissions |
+| **Cleanup** | `mysqladmin shutdown` | Stops temp server cleanly |
+| **Final Start** | `exec mysqld` | Starts real server as PID 1 (container stays alive) |
