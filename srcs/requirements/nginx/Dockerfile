@@ -1,20 +1,32 @@
-FROM debian:bullseye
+FROM debian:bookworm
 
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y \
     nginx \
     openssl \
-    && apt clean
+    && rm -rf /var/lib/apt/lists/*
 
 # Create SSL directory
 RUN mkdir -p /etc/nginx/ssl
 
-# Copy nginx config
-COPY conf/default.conf /etc/nginx/conf.d/default.conf
+# Generate SSL certificate with proper domain
+# Use build argument for login
+ARG LOGIN
+RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/${LOGIN}.42.fr.key \
+    -out /etc/nginx/ssl/${LOGIN}.42.fr.crt \
+    -subj "/C=FR/ST=Ile-de-France/L=Paris/O=42/CN=${LOGIN}.42.fr"
 
-# Copy init script
-COPY tools/init.sh /init.sh
-RUN chmod +x /init.sh
+# Copy configs
+COPY conf/nginx.conf /etc/nginx/nginx.conf
+COPY conf/nginx.conf /etc/nginx/sites-available/default
+
+# Enable site
+RUN ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+
+# Create web root
+RUN mkdir -p /var/www/html && chown -R www-data:www-data /var/www/html
 
 EXPOSE 443
 
-ENTRYPOINT ["/init.sh"]
+# Run nginx in foreground (PID 1)
+CMD ["nginx", "-g", "daemon off;"]

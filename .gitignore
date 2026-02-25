@@ -1,2 +1,8 @@
+# Environment files
+/srcs/.env
+
 en.subject.pdf
-.env
+
+structur.sh
+subject.csv
+comands.csv

@@ -1,38 +1,40 @@
-FROM debian:bullseye
+FROM debian:bookworm
+
+RUN apt-get update && apt-get install -y \
+    php8.2-fpm \
+    php8.2-mysql \
+    php8.2-gd \
+    php8.2-soap \
+    php8.2-xml \
+    php8.2-curl \
+    php8.2-mbstring \
+    php8.2-zip \
+    php8.2-intl \
+    php8.2-imagick \
+    curl \
+    wget \
+    sudo \
+    netcat-openbsd \
+    mariadb-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install WordPress CLI
+RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
+    && chmod +x wp-cli.phar \
+    && mv wp-cli.phar /usr/local/bin/wp
+
+# Create WordPress directory
+RUN mkdir -p /var/www/html && chown -R www-data:www-data /var/www/html
+
+# Copy PHP-FPM configuration
+COPY conf/www.conf /etc/php/8.2/fpm/pool.d/www.conf
+
+# Copy WordPress initialization script
+COPY tools/wordpress_init.sh /usr/local/bin/wordpress_init.sh
+RUN chmod +x /usr/local/bin/wordpress_init.sh
 
 WORKDIR /var/www/html
 
-RUN sed -i 's|deb.debian.org|ftp.de.debian.org|g' /etc/apt/sources.list \
-    && apt update \
-    && apt install -y \
-        php \
-        php-fpm \
-        php-mysql \
-        wget \
-        unzip \
-        gettext \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/*
-
-
-# Clean folder before extracting
-RUN rm -rf /var/www/html/*
-
-# Download and extract WordPress
-RUN wget https://wordpress.org/latest.tar.gz \
-    && tar -xzf latest.tar.gz --strip-components=1 \
-    && rm latest.tar.gz
-
-# Copy wp-config.php if you have one
-# COPY wp-config.php /var/www/html/wp-config.php
-
-# Copy init script (if needed)
-COPY tools/init.sh /init.sh
-RUN chmod +x /init.sh
-
-# Configure php-fpm to listen on port 9000
-RUN sed -i 's|listen = .*|listen = 9000|' /etc/php/7.4/fpm/pool.d/www.conf
-
 EXPOSE 9000
 
-ENTRYPOINT ["/init.sh"]
+CMD ["/usr/local/bin/wordpress_init.sh"]
