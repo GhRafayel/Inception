@@ -3,6 +3,16 @@ set -e
 
 echo "WordPress container starting..."
 
+# Read secrets from mounted files
+MYSQL_USER="${MYSQL_USER:-$(cat /run/secrets/credentials 2>/dev/null)}"
+MYSQL_PASSWORD="${MYSQL_PASSWORD:-$(cat /run/secrets/db_password 2>/dev/null)}"
+
+# Validate required variables
+: "${MYSQL_USER:?ERROR: MYSQL_USER not set in env or secrets}"
+: "${MYSQL_PASSWORD:?ERROR: MYSQL_PASSWORD not set in env or secrets}"
+: "${MYSQL_DATABASE:?ERROR: MYSQL_DATABASE not set}"
+: "${DB_HOST:?ERROR: DB_HOST not set}"
+
 test_db_connection() {
 	mysql -h "${DB_HOST}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" >/dev/null 2>&1
 }

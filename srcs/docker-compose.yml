@@ -3,11 +3,12 @@ services:
     build: ./requirements/mariadb
     container_name: mariadb
     restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    env_file:
+      - .env
+    secrets:
+      - db_root_password
+      - db_password
+      - credentials
     volumes:
       - mariadb:/var/lib/mysql
     networks:
@@ -19,6 +20,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    secrets:
+      - db_password
+      - credentials
     volumes:
       - wordpress:/var/www/html
     depends_on:
@@ -59,3 +63,11 @@ volumes:
 networks:
   inception_network:
     driver: bridge
+
+secrets:
+  db_root_password:
+    file: ../secrets/db_root_password.txt
+  db_password:
+    file: ../secrets/db_password.txt
+  credentials:
+    file: ../secrets/credentials.txt
